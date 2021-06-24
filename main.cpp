@@ -22,9 +22,6 @@
 
 #include "number.h"
 
-typedef long long int64_t;
-typedef unsigned long long uint64_t;
-
 #define MAX_ANSWER 15000
 #define MAX_NUMBERS 10
 #define MAX_STR_SIZE 256
@@ -103,17 +100,32 @@ enum ExtraOp
     EXOP_SQRT = 2
 };
 
+struct Node
+{
+    int op;
+    bool cachedValueValid;
+    Number cachedValue;
+    int numFactorials;
+
+    bool originalValueDecimalPoint;
+    int64_t originalValue;
+};
+
 struct Tree
 {
     int numLeaves;
-    int data[TREE_SIZE];
+    Node node[TREE_SIZE];
 
-    bool cachedValueValid[TREE_SIZE];
-    Number cachedValue[TREE_SIZE];
-    int numFactorials[TREE_SIZE];
-
-    bool originalValueDecimalPoint[TREE_SIZE];
-    int64_t originalValue[TREE_SIZE];
+    Node& getNode(int index)
+    {
+        assert(index < TREE_SIZE);
+        return node[index];
+    }
+    const Node& getNode(int index) const
+    {
+        assert(index < TREE_SIZE);
+        return node[index];
+    }
 };
 
 std::vector<NumberSet> numberSets[MAX_NUMBERS + 1];
@@ -136,24 +148,24 @@ int getDepth(int node)
 
 Tree getEmptyTree()
 {
-    Tree t = {};
+    Tree tree = {};
     for (int i = 0; i < TREE_SIZE; i++)
     {
-        t.data[i] = OP_NONE;
-        t.cachedValueValid[i] = false;
-        t.numFactorials[i] = 0;
+        tree.getNode(i).op = OP_NONE;
+        tree.getNode(i).cachedValueValid = false;
+        tree.getNode(i).numFactorials = 0;
     }
-    return t;
+    return tree;
 }
 
 void copyTreePart(Tree& dst, const Tree& src, int dstPos, int srcPos)
 {
     assert(srcPos < TREE_SIZE && dstPos < TREE_SIZE);
 
-    if (src.data[srcPos] == OP_NONE)
+    if (src.getNode(srcPos).op == OP_NONE)
         return;
 
-    dst.data[dstPos] = OP_EXIST;
+    dst.getNode(dstPos).op = OP_EXIST;
 
     copyTreePart(dst, src, GET_LEFT(dstPos), GET_LEFT(srcPos));
     copyTreePart(dst, src, GET_RIGHT(dstPos), GET_RIGHT(srcPos));
@@ -163,30 +175,30 @@ void createNLeafTrees(int n)
 {
     if (n == 1)
     {
-        Tree t = getEmptyTree();
-        t.numLeaves = n;
-        nLeafTrees[n].push_back(t);
+        Tree tree = getEmptyTree();
+        tree.numLeaves = n;
+        nLeafTrees[n].push_back(tree);
         return;
     }
 
     for (int split = 1; split < n; split++)
     {
-        std::vector<Tree>& left = nLeafTrees[split];
-        std::vector<Tree>& right = nLeafTrees[n - split];
+        std::vector<Tree>& leftTrees = nLeafTrees[split];
+        std::vector<Tree>& rightTrees = nLeafTrees[n - split];
 
-        assert(left.size());
-        assert(right.size());
+        assert(leftTrees.size());
+        assert(rightTrees.size());
 
-        for (Tree& l : left)
+        for (Tree& left : leftTrees)
         {
-            for (Tree& r : right)
+            for (Tree& right : rightTrees)
             {
-                Tree t = getEmptyTree();
-                t.numLeaves = n;
-                t.data[0] = OP_EXIST;
-                copyTreePart(t, l, GET_LEFT(0), 0);
-                copyTreePart(t, r, GET_RIGHT(0), 0);
-                nLeafTrees[n].push_back(t);
+                Tree tree = getEmptyTree();
+                tree.numLeaves = n;
+                tree.getNode(0).op = OP_EXIST;
+                copyTreePart(tree, left, GET_LEFT(0), 0);
+                copyTreePart(tree, right, GET_RIGHT(0), 0);
+                nLeafTrees[n].push_back(tree);
             }
         }
     }
@@ -514,13 +526,15 @@ void addNumber(int64_t n, bool decimalPoint, bool ignoreMinus, char* str, int* o
 
 void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int* offset)
 {
-    if (tree.data[node] == OP_NONE)
+    if (tree.getNode(node).op == OP_NONE)
     {
-        assert(tree.cachedValueValid[node]);
+        assert(tree.getNode(node).cachedValueValid);
 
-        addNumber(tree.originalValue[node], tree.originalValueDecimalPoint[node], ignoreMinus, str, offset);
+        addNumber(tree.getNode(node).originalValue,
+                  tree.getNode(node).originalValueDecimalPoint,
+                  ignoreMinus, str, offset);
 
-        for (int i = 0; i < tree.numFactorials[node]; i++)
+        for (int i = 0; i < tree.getNode(node).numFactorials; i++)
         {
             str[*offset] = '!';
             (*offset)++;
@@ -531,18 +545,19 @@ void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int*
 
     assert(GET_RIGHT(node) < TREE_SIZE);
 
-    int op = tree.data[node];
-    int parentOp = node != 0 ? tree.data[GET_PARENT(node)] : OP_NONE;
+    int op = tree.getNode(node).op;
+    int parentOp = node != 0 ? tree.getNode(GET_PARENT(node)).op : OP_NONE;
     bool omitSum = parentOp == OP_ADD;
     bool omitMul = parentOp == OP_MUL && (op == OP_MUL || op == OP_DIV || op == OP_POW);
     bool omitDiv = parentOp == OP_DIV && op == OP_DIV && node != 0 && node == GET_LEFT(GET_PARENT(node));
-    bool omitBrackets = !tree.numFactorials[node] && (node == 0 || omitSum || omitMul || omitDiv);
+    bool omitBrackets = !tree.getNode(node).numFactorials && (node == 0 || omitSum || omitMul || omitDiv);
 
     // TODO: proper fix
-    bool factorialFix = tree.numFactorials[node] && tree.cachedValue[node].isNegative();
-    bool addFix = op == OP_ADD && tree.data[GET_RIGHT(node)] == OP_NONE && tree.originalValue[GET_RIGHT(node)] < 0;
-    bool powFix = op == OP_POW && tree.cachedValue[GET_LEFT(node)].isNegative();
-    bool powFixLeftNumber = powFix && tree.data[GET_LEFT(node)] == OP_NONE;
+    bool factorialFix = tree.getNode(node).numFactorials && tree.getNode(node).cachedValue.isNegative();
+    bool addFix = op == OP_ADD && tree.getNode(GET_RIGHT(node)).op == OP_NONE
+        && tree.getNode(GET_RIGHT(node)).originalValue < 0;
+    bool powFix = op == OP_POW && tree.getNode(GET_LEFT(node)).cachedValue.isNegative();
+    bool powFixLeftNumber = powFix && tree.getNode(GET_LEFT(node)).op == OP_NONE;
 
     if (factorialFix)
     {
@@ -619,7 +634,7 @@ void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int*
         (*offset)++;
     }
 
-    for (int i = 0; i < tree.numFactorials[node]; i++)
+    for (int i = 0; i < tree.getNode(node).numFactorials; i++)
     {
         str[*offset] = '!';
         (*offset)++;
@@ -671,22 +686,22 @@ int64_t getFactorial(int64_t n)
 
 Number solveEquationPart(Tree& tree, int node, bool* valid)
 {
-    if (tree.cachedValueValid[node])
+    if (tree.getNode(node).cachedValueValid)
     {
         *valid = true;
-        return tree.cachedValue[node];
+        return tree.getNode(node).cachedValue;
     }
 
-    if (tree.data[node] == OP_NONE)
+    if (tree.getNode(node).op == OP_NONE)
     {
-        int64_t n = tree.originalValue[node];
-        for (int i = 0; i < tree.numFactorials[node]; i++)
+        int64_t n = tree.getNode(node).originalValue;
+        for (int i = 0; i < tree.getNode(node).numFactorials; i++)
             n = getFactorial(n);
 
-        tree.cachedValue[node] = n;
-        tree.cachedValueValid[node] = true;
+        tree.getNode(node).cachedValue = n;
+        tree.getNode(node).cachedValueValid = true;
         *valid = true;
-        return tree.cachedValue[node];
+        return tree.getNode(node).cachedValue;
     }
 
     bool leftValid, rightValid;
@@ -702,7 +717,7 @@ Number solveEquationPart(Tree& tree, int node, bool* valid)
 
     bool leftNegative = false;
 
-    switch (tree.data[node])
+    switch (tree.getNode(node).op)
     {
     case OP_ADD:
         if (!left.add(right))
@@ -767,23 +782,23 @@ Number solveEquationPart(Tree& tree, int node, bool* valid)
     default: assert(0); break;
     }
 
-    if (tree.numFactorials[node])
+    if (tree.getNode(node).numFactorials)
     {
         assert(left.isInteger());
         int64_t n = left.getIntegerValue();
-        for (int i = 0; i < tree.numFactorials[node]; i++)
+        for (int i = 0; i < tree.getNode(node).numFactorials; i++)
             n = getFactorial(n);
         left = n;
     }
 
-    tree.cachedValueValid[node] = true;
-    tree.cachedValue[node] = left;
+    tree.getNode(node).cachedValueValid = true;
+    tree.getNode(node).cachedValue = left;
 
     *valid = true;
     return left;
 }
 
-void solveEquation(Tree& t, int nodePositions[][MAX_NUMBERS], int depth, bool needSolve)
+void solveEquation(Tree& tree, int nodePositions[][MAX_NUMBERS], int depth, bool needSolve)
 {
     bool valid = true;
 
@@ -791,13 +806,13 @@ void solveEquation(Tree& t, int nodePositions[][MAX_NUMBERS], int depth, bool ne
     {
         statistics.numEquations++;
 
-        Number result = solveEquationPart(t, 0, &valid);
+        Number result = solveEquationPart(tree, 0, &valid);
 
         if (valid)
             statistics.numEquationsWithAnswer++;
 
         if (valid && result.isInteger())
-            addAnswer(t, result.getIntegerValue());
+            addAnswer(tree, result.getIntegerValue());
     }
 
     if (globalOperation[GLOP_FACTORIAL] && depth != 0 && valid)
@@ -815,10 +830,10 @@ void solveEquation(Tree& t, int nodePositions[][MAX_NUMBERS], int depth, bool ne
         for (int i = 0; i < numNodes; i++)
         {
             int node = nodePositions[depth][i];
-            assert(t.cachedValueValid[node]);
-            if (t.cachedValue[node].isInteger())
+            assert(tree.getNode(node).cachedValueValid);
+            if (tree.getNode(node).cachedValue.isInteger())
             {
-                int64_t val = t.cachedValue[node].getIntegerValue();
+                int64_t val = tree.getNode(node).cachedValue.getIntegerValue();
                 if (val >= -MAX_FACTORIAL && val <= MAX_FACTORIAL
                     && val != 1 && val != -1 && val != 2 && val != -2)
                 {
@@ -836,7 +851,7 @@ void solveEquation(Tree& t, int nodePositions[][MAX_NUMBERS], int depth, bool ne
 
         for (int i = 0; i < (1 << numFactorialPositions); i++)
         {
-            Tree newTree = t;
+            Tree newTree = tree;
             bool skip = false;
             for (int j = 0; j < numFactorialPositions; j++)
             {
@@ -849,11 +864,11 @@ void solveEquation(Tree& t, int nodePositions[][MAX_NUMBERS], int depth, bool ne
 
                 if (i & (1 << j))
                 {
-                    newTree.numFactorials[factorialPositions[j]]++;
+                    newTree.getNode(factorialPositions[j]).numFactorials++;
                     int node = factorialPositions[j];
                     for (;;)
                     {
-                        newTree.cachedValueValid[node] = false;
+                        newTree.getNode(node).cachedValueValid = false;
                         if (!node)
                             break;
 
@@ -870,13 +885,13 @@ void solveEquation(Tree& t, int nodePositions[][MAX_NUMBERS], int depth, bool ne
 
 void setLeafCachedValuesPart(const NumberSet& numSet, int* currentNumber, Tree& tree, int node)
 {
-    if (tree.data[node] == OP_NONE)
+    if (tree.getNode(node).op == OP_NONE)
     {
         Number number = numSet.n[*currentNumber];
-        tree.cachedValue[node] = number;
-        tree.cachedValueValid[node] = true;
-        tree.originalValue[node] = numSet.originalValue[*currentNumber];
-        tree.originalValueDecimalPoint[node] = numSet.originalValueDecimalPoint[*currentNumber];
+        tree.getNode(node).cachedValue = number;
+        tree.getNode(node).cachedValueValid = true;
+        tree.getNode(node).originalValue = numSet.originalValue[*currentNumber];
+        tree.getNode(node).originalValueDecimalPoint = numSet.originalValueDecimalPoint[*currentNumber];
         (*currentNumber)++;
         return;
     }
@@ -892,9 +907,9 @@ void setLeafCachedValues(const NumberSet& numSet, Tree& tree)
     assert(currentNumber == numSet.numNumbers);
 }
 
-void solveEquationSetWithParams(Tree& t, int opPositions[], int nodePositions[][MAX_NUMBERS])
+void solveEquationSetWithParams(Tree& tree, int opPositions[], int nodePositions[][MAX_NUMBERS])
 {
-    int numOps = t.numLeaves - 1;
+    int numOps = tree.numLeaves - 1;
     int numTrees = 1 << (2 * numOps); // XXX: 2 bits per op
 
     int maxDepth = 0;
@@ -924,7 +939,7 @@ void solveEquationSetWithParams(Tree& t, int opPositions[], int nodePositions[][
 
             // add/mul incorrect order skip
             if ((op == OP_ADD || op == OP_MUL)
-                && node != 0 && t.data[parent] == op
+                && node != 0 && tree.getNode(parent).op == op
                 && GET_RIGHT(parent) == node)
             {
                 doNotSolve = true;
@@ -933,7 +948,7 @@ void solveEquationSetWithParams(Tree& t, int opPositions[], int nodePositions[][
 
             // a / (b / c) skip
             if (op == OP_DIV
-                && node != 0 && t.data[parent] == OP_DIV
+                && node != 0 && tree.getNode(parent).op == OP_DIV
                 && GET_RIGHT(parent) == node)
             {
                 doNotSolve = true;
@@ -941,24 +956,24 @@ void solveEquationSetWithParams(Tree& t, int opPositions[], int nodePositions[][
             }
 
             int rightMostLeftNode = GET_RIGHT(node);
-            while (t.data[rightMostLeftNode] != OP_NONE)
+            while (tree.getNode(rightMostLeftNode).op != OP_NONE)
                 rightMostLeftNode = GET_LEFT(rightMostLeftNode);
 
             // a * -b skip | a / -b skip
             // note: there could we: -a * (b - c), where b - c < 0
             if ((op == OP_MUL || op == OP_DIV)
-                && t.originalValue[rightMostLeftNode] < 0)
+                && tree.getNode(rightMostLeftNode).originalValue < 0)
             {
                 doNotSolve = true;
                 break;
             }
 
-            if (t.data[node] != op)
+            if (tree.getNode(node).op != op)
             {
                 int n = node;
                 for (;;)
                 {
-                    t.cachedValueValid[n] = false;
+                    tree.getNode(n).cachedValueValid = false;
                     if (!n)
                         break;
 
@@ -966,10 +981,10 @@ void solveEquationSetWithParams(Tree& t, int opPositions[], int nodePositions[][
                 }
             }
 
-            t.data[node] = op;
+            tree.getNode(node).op = op;
         }
         if (!doNotSolve)
-            solveEquation(t, nodePositions, maxDepth, true);
+            solveEquation(tree, nodePositions, maxDepth, true);
     }
 }
 
@@ -995,7 +1010,7 @@ void getOpAndNodePositions(const Tree& tree, int opPositions[], int nodePosition
         nodePositions[depth][nodeIndex[depth]] = node;
         nodeIndex[depth]++;
 
-        if (tree.data[node] != OP_NONE)
+        if (tree.getNode(node).op != OP_NONE)
         {
             opPositions[opIndex] = node;
             opIndex++;
