@@ -975,6 +975,14 @@ Number solveEquationPart(Tree& tree, int node, bool* valid)
         return left;
     }
 
+    // a * -b skip | a / -b skip
+    if ((tree.getNode(node).op == OP_MUL || tree.getNode(node).op == OP_DIV)
+        && right.isNegative())
+    {
+        *valid = false;
+        return left;
+    }
+
     bool leftNegative = false;
 
     switch (tree.getNode(node).op)
@@ -1285,15 +1293,10 @@ void solveEquationSetWithParams(Tree& tree, int opPositions[], int nodePositions
                 break;
             }
 
-            int rightMostLeftNode = GET_RIGHT(node);
-            while (tree.getNode(rightMostLeftNode).op != OP_NONE)
-                rightMostLeftNode = GET_LEFT(rightMostLeftNode);
-
-            // a * -b skip | a / -b skip
-            // note: there could we: -a * (b - c), where b - c < 0
-            // TODO: weak this fix and make a proper fix in solve
+            // a * -b skip | a / -b skip, where b is number
             if ((op == OP_MUL || op == OP_DIV)
-                && tree.getNode(rightMostLeftNode).originalValue < 0)
+                && tree.getNode(GET_RIGHT(node)).op == OP_NONE
+                && tree.getNode(GET_RIGHT(node)).originalValue < 0)
             {
                 doNotSolve = true;
                 break;
