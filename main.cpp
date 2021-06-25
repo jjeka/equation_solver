@@ -13,7 +13,7 @@
 
 //#define SKIP_EMPTY
 #define NUM_THREADS 16
-//#define DISABLE_ASSERTS
+#define DISABLE_ASSERTS
 
 #ifdef DISABLE_ASSERTS
 #undef assert
@@ -91,6 +91,8 @@ enum Operation
 struct NumberSetNumber
 {
     Number n;
+
+    // for result printing
     int64_t originalValue;
     bool originalValueDecimal;
     bool originalValueRepeatingDecimal;
@@ -124,11 +126,12 @@ struct Node
     int op;
     bool cachedValueValid;
     Number cachedValue;
+    bool cachedValueWithoutFactAndSqrtValid;
+    Number cachedValueWithoutFactAndSqrt;
     int numFactorials;
     int numSqrts;
 
-    // TODO: use this value before operation
-    Number originalValueWithoutFactAndSqrt;
+    // for result printing
     bool originalValueDecimal;
     bool originalValueRepeatingDecimal;
     int64_t originalValue;
@@ -176,6 +179,7 @@ Tree getEmptyTree()
     {
         tree.getNode(i).op = OP_NONE;
         tree.getNode(i).cachedValueValid = false;
+        tree.getNode(i).cachedValueWithoutFactAndSqrtValid = false;
         tree.getNode(i).numFactorials = 0;
         tree.getNode(i).numSqrts = 0;
     }
@@ -606,10 +610,10 @@ void addNumber(int64_t n, bool decimal, bool repeatingDecimal, bool ignoreMinus,
 
 void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int* offset)
 {
+    assert(tree.getNode(node).cachedValueValid);
+
     if (tree.getNode(node).op == OP_NONE)
     {
-        assert(tree.getNode(node).cachedValueValid);
-
         bool sqrtMinusFix = tree.getNode(node).originalValue < 0 && !ignoreMinus;
 
         if (sqrtMinusFix)
@@ -936,13 +940,14 @@ Number solveEquationPart(Tree& tree, int node, bool* valid)
 {
     if (tree.getNode(node).cachedValueValid)
     {
+        assert(tree.getNode(node).cachedValueWithoutFactAndSqrtValid);
         *valid = true;
         return tree.getNode(node).cachedValue;
     }
 
-    if (tree.getNode(node).op == OP_NONE)
+    if (tree.getNode(node).cachedValueWithoutFactAndSqrtValid)
     {
-        Number n = tree.getNode(node).originalValueWithoutFactAndSqrt;
+        Number n = tree.getNode(node).cachedValueWithoutFactAndSqrt;
         for (int i = 0; i < tree.getNode(node).numSqrts; i++)
         {
             n = getSqrt(n, valid);
@@ -958,11 +963,13 @@ Number solveEquationPart(Tree& tree, int node, bool* valid)
                 return n;
         }
 
-        tree.getNode(node).cachedValue = n;
         tree.getNode(node).cachedValueValid = true;
+        tree.getNode(node).cachedValue = n;
         *valid = true;
         return tree.getNode(node).cachedValue;
     }
+
+    assert(tree.getNode(node).op != OP_NONE);
 
     bool leftValid, rightValid;
 
@@ -1049,6 +1056,9 @@ Number solveEquationPart(Tree& tree, int node, bool* valid)
         break;
     default: assert(0); break;
     }
+
+    tree.getNode(node).cachedValueWithoutFactAndSqrtValid = true;
+    tree.getNode(node).cachedValueWithoutFactAndSqrt = left;
 
     for (int i = 0; i < tree.getNode(node).numSqrts; i++)
     {
@@ -1164,7 +1174,10 @@ void solveEquation(Tree& tree, int nodePositions[][MAX_NUMBERS], int depth, bool
                     int node = sqrtPositions[sqrt];
                     for (;;)
                     {
+                        if (node != sqrtPositions[sqrt])
+                            sqrtTree.getNode(node).cachedValueWithoutFactAndSqrtValid = false;
                         sqrtTree.getNode(node).cachedValueValid = false;
+
                         if (!node)
                             break;
 
@@ -1201,7 +1214,10 @@ void solveEquation(Tree& tree, int nodePositions[][MAX_NUMBERS], int depth, bool
                         int node = factorialPositions[fact];
                         for (;;)
                         {
+                            if (node != factorialPositions[fact])
+                                factTree.getNode(node).cachedValueWithoutFactAndSqrtValid = false;
                             factTree.getNode(node).cachedValueValid = false;
+
                             if (!node)
                                 break;
 
@@ -1211,7 +1227,7 @@ void solveEquation(Tree& tree, int nodePositions[][MAX_NUMBERS], int depth, bool
                 }
 
                 if (!factSkip)
-                    solveEquation(factTree, nodePositions, depth - 1, factSet != 0 || sqrtSet != 0);
+                    solveEquation(factTree, nodePositions, depth - 1, sqrtSet != 0 || factSet != 0);
             }
         }
     }
@@ -1224,7 +1240,8 @@ void setLeafCachedValuesPart(const NumberSet& numSet, int* currentNumber, Tree& 
         Number number = numSet.getNumber(*currentNumber).n;
         tree.getNode(node).cachedValue = number;
         tree.getNode(node).cachedValueValid = true;
-        tree.getNode(node).originalValueWithoutFactAndSqrt = number;
+        tree.getNode(node).cachedValueWithoutFactAndSqrt = number;
+        tree.getNode(node).cachedValueWithoutFactAndSqrtValid = true;
         tree.getNode(node).originalValue = numSet.getNumber(*currentNumber).originalValue;
         tree.getNode(node).originalValueDecimal =
             numSet.getNumber(*currentNumber).originalValueDecimal;
@@ -1296,7 +1313,7 @@ void solveEquationSetWithParams(Tree& tree, int opPositions[], int nodePositions
             // a * -b skip | a / -b skip, where b is number
             if ((op == OP_MUL || op == OP_DIV)
                 && tree.getNode(GET_RIGHT(node)).op == OP_NONE
-                && tree.getNode(GET_RIGHT(node)).originalValue < 0)
+                && tree.getNode(GET_RIGHT(node)).cachedValueWithoutFactAndSqrt.isNegative())
             {
                 doNotSolve = true;
                 break;
@@ -1308,6 +1325,7 @@ void solveEquationSetWithParams(Tree& tree, int opPositions[], int nodePositions
                 for (;;)
                 {
                     tree.getNode(n).cachedValueValid = false;
+                    tree.getNode(n).cachedValueWithoutFactAndSqrtValid = false;
                     if (!n)
                         break;
 
@@ -1365,10 +1383,10 @@ void solveEquationSet(const NumberSet& numSet, const Tree& tree)
     int nodePositions[MAX_NUMBERS - 1][MAX_NUMBERS];
     getOpAndNodePositions(tree, opPositions, nodePositions);
 
-    Tree t = tree;
-    setLeafCachedValues(numSet, t);
+    Tree tmpTree = tree;
+    setLeafCachedValues(numSet, tmpTree);
 
-    solveEquationSetWithParams(t, opPositions, nodePositions);
+    solveEquationSetWithParams(tmpTree, opPositions, nodePositions);
 }
 
 int findTask()
