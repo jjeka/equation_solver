@@ -45,7 +45,8 @@ enum GlobalOperation
 {
     GLOP_CONCATENATE,
     GLOP_MINUS,
-    GLOP_DECIMAL_POINT,
+    GLOP_DECIMAL,
+    GLOP_REPEATING_DECIMAL,
     GLOP_ADD,
     GLOP_MULTIPLY,
     GLOP_DIVIDE,
@@ -86,12 +87,29 @@ enum Operation
     OP_NONE
 };
 
+struct NumberSetNumber
+{
+    Number n;
+    int64_t originalValue;
+    bool originalValueDecimal;
+    bool originalValueRepeatingDecimal;
+};
+
 struct NumberSet
 {
     int numNumbers;
-    Number n[MAX_NUMBERS];
-    int originalValue[MAX_NUMBERS];
-    bool originalValueDecimalPoint[MAX_NUMBERS];
+    NumberSetNumber number[MAX_NUMBERS];
+
+    NumberSetNumber& getNumber(int index)
+    {
+        assert(index < MAX_NUMBERS);
+        return number[index];
+    }
+    const NumberSetNumber& getNumber(int index) const
+    {
+        assert(number < MAX_NUMBERS);
+        return number[index];
+    }
 };
 
 enum ExtraOp
@@ -107,7 +125,8 @@ struct Node
     Number cachedValue;
     int numFactorials;
 
-    bool originalValueDecimalPoint;
+    bool originalValueDecimal;
+    bool originalValueRepeatingDecimal;
     int64_t originalValue;
 };
 
@@ -283,7 +302,9 @@ bool prepareData()
     if (strstr(str, "-"))
         globalOperation[GLOP_MINUS] = true;
     if (strstr(str, "."))
-        globalOperation[GLOP_DECIMAL_POINT] = true;
+        globalOperation[GLOP_DECIMAL] = true;
+    if (strstr(str, "r"))
+        globalOperation[GLOP_REPEATING_DECIMAL] = true;
     if (strstr(str, "+"))
         globalOperation[GLOP_ADD] = true;
     if (strstr(str, "*"))
@@ -319,17 +340,28 @@ bool prepareData()
         int numSigns = globalOperation[GLOP_MINUS] ? (1 << numNumbers) : 1;
         for (int j = 0; j < numSigns; j++)
         {
-            int numDecimalPoints = globalOperation[GLOP_DECIMAL_POINT] ? (1 << numNumbers) : 1;
-            for (int k = 0; k < numDecimalPoints; k++)
+            int numDecimalsOrRepeatingDecimals = 1;
+            if (globalOperation[GLOP_DECIMAL])
+                numDecimalsOrRepeatingDecimals *= 1 << numNumbers;
+            if (globalOperation[GLOP_REPEATING_DECIMAL])
+                numDecimalsOrRepeatingDecimals *= 1 << numNumbers;
+            bool decimalsAndRepeatingDecimals = globalOperation[GLOP_DECIMAL] &&
+                globalOperation[GLOP_REPEATING_DECIMAL];
+
+            for (int k = 0; k < numDecimalsOrRepeatingDecimals; k++)
             {
                 NumberSet numberSet;
                 numberSet.numNumbers = numNumbers;
                 bool badNumberSet = false;
 
-                numberSet.n[0] = numbers[0];
+                if (decimalsAndRepeatingDecimals &&
+                    (k & (1 << numNumbers)) & (k >> numNumbers))
+                    continue;
+
+                numberSet.getNumber(0).n = numbers[0];
 
                 if (j & 1)
-                    numberSet.n[0].changeSign();
+                    numberSet.getNumber(0).n.changeSign();
 
                 int n = 0;
                 for (int l = 0; l < numInputNumbers - 1; l++)
@@ -337,11 +369,19 @@ bool prepareData()
                     if (!(i & (1 << l)))
                     {
                         assert(numberSet.n[n].isInteger());
-                        numberSet.originalValue[n] = numberSet.n[n].getIntegerValue();
-                        numberSet.originalValueDecimalPoint[n] = (k & (1 << n));
-                        if (k & (1 << n))
+                        numberSet.getNumber(n).originalValue = numberSet.getNumber(n).n.getIntegerValue();
+                        numberSet.getNumber(n).originalValueDecimal =
+                            globalOperation[GLOP_DECIMAL] ? (k & (1 << n)) : false;
+                        numberSet.getNumber(n).originalValueRepeatingDecimal =
+                            globalOperation[GLOP_REPEATING_DECIMAL]
+                                ? (globalOperation[GLOP_DECIMAL] ? (k & (1 << (numNumbers + n)))
+                                : (k & (1 << n))) : false;
+                        if (numberSet.getNumber(n).originalValueDecimal
+                            || numberSet.getNumber(n).originalValueRepeatingDecimal)
                         {
-                            if (!numberSet.n[n].fromDecimalPoint(numberSet.n[n].getIntegerValue()))
+                            if (!numberSet.getNumber(n).n.fromDecimal(
+                                    numberSet.getNumber(n).n.getIntegerValue(),
+                                    numberSet.getNumber(n).originalValueRepeatingDecimal))
                             {
                                 badNumberSet = true;
                                 break;
@@ -349,10 +389,10 @@ bool prepareData()
                         }
 
                         n++;
-                        numberSet.n[n] = numbers[l + 1];
+                        numberSet.getNumber(n).n = numbers[l + 1];
                         if (j & (1 << n))
                         {
-                            if (!numberSet.n[n].changeSign())
+                            if (!numberSet.getNumber(n).n.changeSign())
                             {
                                 printf("Error: internal changeSign error\n");
                                 return false;
@@ -364,11 +404,12 @@ bool prepareData()
                         // concatenate
                         int64_t newNumber = numbers[l + 1];
                         int64_t mulValue = get10PowNumberDigits(newNumber);
-                        Number result = numberSet.n[n];
+                        Number result = numberSet.getNumber(n).n;
 
                         if (!result.mul(mulValue))
                         {
-                            printf("Warning: skip big number %llu%llu", numberSet.n[n].getIntegerValue(), newNumber);
+                            printf("Warning: skip big number %llu%llu",
+                                   numberSet.getNumber(n).n.getIntegerValue(), newNumber);
                             badNumberSet = true;
                             break;
                         }
@@ -385,7 +426,8 @@ bool prepareData()
 
                         if (!result.add(newNumber))
                         {
-                            printf("Warning: skip big number %llu%llu", numberSet.n[n].getIntegerValue(), newNumber);
+                            printf("Warning: skip big number %llu%llu",
+                                   numberSet.getNumber(n).n.getIntegerValue(), newNumber);
                             badNumberSet = true;
                             break;
                         }
@@ -399,16 +441,24 @@ bool prepareData()
                             }
                         }
 
-                        numberSet.n[n] = result;
+                        numberSet.getNumber(n).n = result;
                     }
                 }
 
                 assert(numberSet.n[n].isInteger());
-                numberSet.originalValue[n] = numberSet.n[n].getIntegerValue();
-                numberSet.originalValueDecimalPoint[n] = (k & (1 << n));
-                if (k & (1 << n))
+                numberSet.getNumber(n).originalValue = numberSet.getNumber(n).n.getIntegerValue();
+                numberSet.getNumber(n).originalValueDecimal =
+                    globalOperation[GLOP_DECIMAL] ? (k & (1 << n)) : false;
+                numberSet.getNumber(n).originalValueRepeatingDecimal =
+                    globalOperation[GLOP_REPEATING_DECIMAL]
+                        ? (globalOperation[GLOP_DECIMAL] ? (k & (1 << (numNumbers + n)))
+                        : (k & (1 << n))) : false;
+                if (numberSet.getNumber(n).originalValueDecimal
+                    || numberSet.getNumber(n).originalValueRepeatingDecimal)
                 {
-                    if (!numberSet.n[n].fromDecimalPoint(numberSet.n[n].getIntegerValue()))
+                    if (!numberSet.getNumber(n).n.fromDecimal(
+                        numberSet.getNumber(n).n.getIntegerValue(),
+                        numberSet.getNumber(n).originalValueRepeatingDecimal))
                     {
                         badNumberSet = true;
                         break;
@@ -440,8 +490,10 @@ bool prepareData()
         printf("concatenate ");
     if (globalOperation[GLOP_MINUS])
         printf("minus ");
-    if (globalOperation[GLOP_DECIMAL_POINT])
-        printf("decimal_point ");
+    if (globalOperation[GLOP_DECIMAL])
+        printf("decimal ");
+    if (globalOperation[GLOP_REPEATING_DECIMAL])
+        printf("repeating_decimal ");
     if (globalOperation[GLOP_ADD])
         printf("add ");
     if (globalOperation[GLOP_MULTIPLY])
@@ -493,7 +545,7 @@ void printResult()
     printf("RESULT SAVED\n");
 }
 
-void addNumber(int64_t n, bool decimalPoint, bool ignoreMinus, char* str, int* offset)
+void addNumber(int64_t n, bool decimal, bool repeatingDecimal, bool ignoreMinus, char* str, int* offset)
 {
     if (n < 0)
     {
@@ -505,9 +557,14 @@ void addNumber(int64_t n, bool decimalPoint, bool ignoreMinus, char* str, int* o
         n = -n;
     }
 
-    if (decimalPoint)
+    if (decimal || repeatingDecimal)
     {
         str[*offset] = '.';
+        (*offset)++;
+    }
+    if (repeatingDecimal)
+    {
+        str[*offset] = '(';
         (*offset)++;
     }
 
@@ -522,6 +579,12 @@ void addNumber(int64_t n, bool decimalPoint, bool ignoreMinus, char* str, int* o
         (*offset)++;
     }
     while (n != 0);
+
+    if (repeatingDecimal)
+    {
+        str[*offset] = ')';
+        (*offset)++;
+    }
 }
 
 void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int* offset)
@@ -531,7 +594,8 @@ void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int*
         assert(tree.getNode(node).cachedValueValid);
 
         addNumber(tree.getNode(node).originalValue,
-                  tree.getNode(node).originalValueDecimalPoint,
+                  tree.getNode(node).originalValueDecimal,
+                  tree.getNode(node).originalValueRepeatingDecimal,
                   ignoreMinus, str, offset);
 
         for (int i = 0; i < tree.getNode(node).numFactorials; i++)
@@ -887,11 +951,14 @@ void setLeafCachedValuesPart(const NumberSet& numSet, int* currentNumber, Tree& 
 {
     if (tree.getNode(node).op == OP_NONE)
     {
-        Number number = numSet.n[*currentNumber];
+        Number number = numSet.getNumber(*currentNumber).n;
         tree.getNode(node).cachedValue = number;
         tree.getNode(node).cachedValueValid = true;
-        tree.getNode(node).originalValue = numSet.originalValue[*currentNumber];
-        tree.getNode(node).originalValueDecimalPoint = numSet.originalValueDecimalPoint[*currentNumber];
+        tree.getNode(node).originalValue = numSet.getNumber(*currentNumber).originalValue;
+        tree.getNode(node).originalValueDecimal =
+            numSet.getNumber(*currentNumber).originalValueDecimal;
+        tree.getNode(node).originalValueRepeatingDecimal =
+            numSet.getNumber(*currentNumber).originalValueRepeatingDecimal;
         (*currentNumber)++;
         return;
     }

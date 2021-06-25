@@ -22,7 +22,7 @@ class Number
 public:
     Number(int64_t numValue = 0);
 
-    bool fromDecimalPoint(int64_t numValue);
+    bool fromDecimal(int64_t numValue, bool repeating);
 
     bool isInteger() const;
     int64_t getIntegerValue() const;
@@ -60,9 +60,11 @@ int64_t gcd(int64_t a, int64_t b)
     return (a == 0) ? b : gcd(b % a, a);
 }
 
-bool Number::fromDecimalPoint(int64_t numValue)
+bool Number::fromDecimal(int64_t numValue, bool repeating)
 {
     int64_t n = get10PowNumberDigits(numValue);
+    if (repeating)
+        n--;
     int64_t gcdValue = gcd(n, numValue);
 
     if (COEF % gcdValue != 0)
@@ -173,9 +175,12 @@ Number::Number(int64_t numValue):
 {
 }
 
-bool Number::fromDecimalPoint(int64_t numValue)
+bool Number::fromDecimal(int64_t numValue, bool repeating)
 {
-    val = 1.0 / get10PowNumberDigits(numValue) * numValue;
+    int64_t denominator = get10PowNumberDigits(numValue);
+    if (repeating)
+        denominator--;
+    val = numValue / (double)denominator;
     return std::isfinite(val);
 }
 
