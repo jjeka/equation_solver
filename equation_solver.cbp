@@ -13,6 +13,9 @@
 				<Option type="1" />
 				<Option compiler="gcc" />
 				<Compiler>
+					<Add option="-pedantic" />
+					<Add option="-Wextra" />
+					<Add option="-Wall" />
 					<Add option="-g" />
 				</Compiler>
 			</Target>
@@ -26,6 +29,9 @@
 					<Add option="-fexpensive-optimizations" />
 					<Add option="-flto" />
 					<Add option="-O3" />
+					<Add option="-pedantic" />
+					<Add option="-Wextra" />
+					<Add option="-Wall" />
 					<Add option="-m64" />
 				</Compiler>
 				<Linker>
