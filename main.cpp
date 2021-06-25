@@ -13,7 +13,7 @@
 
 //#define SKIP_EMPTY
 #define NUM_THREADS 16
-#define DISABLE_ASSERTS
+//#define DISABLE_ASSERTS
 
 #ifdef DISABLE_ASSERTS
 #undef assert
@@ -22,14 +22,15 @@
 
 #include "number.h"
 
-#define MAX_ANSWER 15000
+#define MAX_ANSWER 50000
 #define MAX_NUMBERS 10
-#define MAX_STR_SIZE 256
+#define MAX_STR_SIZE 512
 #define TREE_SIZE (1 << MAX_NUMBERS)
 #define TASK_SIZE 8
-#define MAX_FACTORIAL 7
-#define MAX_NODE_FACTORIALS 2
 
+#define MAX_FACTORIAL 7
+#define MAX_NODE_SQRTS 6
+#define MAX_NODE_FACTORIALS 2
 #define MAX_POWER 30
 #define MAX_DIV_BY 100000
 
@@ -107,7 +108,7 @@ struct NumberSet
     }
     const NumberSetNumber& getNumber(int index) const
     {
-        assert(number < MAX_NUMBERS);
+        assert(index < MAX_NUMBERS);
         return number[index];
     }
 };
@@ -124,7 +125,10 @@ struct Node
     bool cachedValueValid;
     Number cachedValue;
     int numFactorials;
+    int numSqrts;
 
+    // TODO: use this value before operation
+    Number originalValueWithoutFactAndSqrt;
     bool originalValueDecimal;
     bool originalValueRepeatingDecimal;
     int64_t originalValue;
@@ -173,6 +177,7 @@ Tree getEmptyTree()
         tree.getNode(i).op = OP_NONE;
         tree.getNode(i).cachedValueValid = false;
         tree.getNode(i).numFactorials = 0;
+        tree.getNode(i).numSqrts = 0;
     }
     return tree;
 }
@@ -355,20 +360,26 @@ bool prepareData()
                 bool badNumberSet = false;
 
                 if (decimalsAndRepeatingDecimals &&
-                    (k & (1 << numNumbers)) & (k >> numNumbers))
+                    (k & ((1 << numNumbers) - 1)) & (k >> numNumbers))
                     continue;
 
-                numberSet.getNumber(0).n = numbers[0];
+                numberSet.getNumber(0).n = Number(numbers[0]);
 
                 if (j & 1)
-                    numberSet.getNumber(0).n.changeSign();
+                {
+                    if (!numberSet.getNumber(0).n.changeSign())
+                    {
+                        printf("Error: internal changeSign error\n");
+                        return false;
+                    }
+                }
 
                 int n = 0;
                 for (int l = 0; l < numInputNumbers - 1; l++)
                 {
                     if (!(i & (1 << l)))
                     {
-                        assert(numberSet.n[n].isInteger());
+                        assert(numberSet.getNumber(n).n.isInteger());
                         numberSet.getNumber(n).originalValue = numberSet.getNumber(n).n.getIntegerValue();
                         numberSet.getNumber(n).originalValueDecimal =
                             globalOperation[GLOP_DECIMAL] ? (k & (1 << n)) : false;
@@ -379,6 +390,13 @@ bool prepareData()
                         if (numberSet.getNumber(n).originalValueDecimal
                             || numberSet.getNumber(n).originalValueRepeatingDecimal)
                         {
+                            if (numberSet.getNumber(n).n.isInteger()
+                                && numberSet.getNumber(n).n.getIntegerValue() == 0)
+                            {
+                                badNumberSet = true;
+                                break;
+                            }
+
                             if (!numberSet.getNumber(n).n.fromDecimal(
                                     numberSet.getNumber(n).n.getIntegerValue(),
                                     numberSet.getNumber(n).originalValueRepeatingDecimal))
@@ -389,7 +407,7 @@ bool prepareData()
                         }
 
                         n++;
-                        numberSet.getNumber(n).n = numbers[l + 1];
+                        numberSet.getNumber(n).n = Number(numbers[l + 1]);
                         if (j & (1 << n))
                         {
                             if (!numberSet.getNumber(n).n.changeSign())
@@ -406,7 +424,7 @@ bool prepareData()
                         int64_t mulValue = get10PowNumberDigits(newNumber);
                         Number result = numberSet.getNumber(n).n;
 
-                        if (!result.mul(mulValue))
+                        if (!result.mul(Number(mulValue)))
                         {
                             printf("Warning: skip big number %llu%llu",
                                    numberSet.getNumber(n).n.getIntegerValue(), newNumber);
@@ -424,7 +442,7 @@ bool prepareData()
                             }
                         }
 
-                        if (!result.add(newNumber))
+                        if (!result.add(Number(newNumber)))
                         {
                             printf("Warning: skip big number %llu%llu",
                                    numberSet.getNumber(n).n.getIntegerValue(), newNumber);
@@ -445,7 +463,7 @@ bool prepareData()
                     }
                 }
 
-                assert(numberSet.n[n].isInteger());
+                assert(numberSet.getNumber(n).n.isInteger());
                 numberSet.getNumber(n).originalValue = numberSet.getNumber(n).n.getIntegerValue();
                 numberSet.getNumber(n).originalValueDecimal =
                     globalOperation[GLOP_DECIMAL] ? (k & (1 << n)) : false;
@@ -456,15 +474,14 @@ bool prepareData()
                 if (numberSet.getNumber(n).originalValueDecimal
                     || numberSet.getNumber(n).originalValueRepeatingDecimal)
                 {
+                    if (numberSet.getNumber(n).n.isInteger()
+                        && numberSet.getNumber(n).n.getIntegerValue() == 0)
+                        continue;
                     if (!numberSet.getNumber(n).n.fromDecimal(
                         numberSet.getNumber(n).n.getIntegerValue(),
                         numberSet.getNumber(n).originalValueRepeatingDecimal))
-                    {
-                        badNumberSet = true;
-                        break;
-                    }
+                        continue;
                 }
-
 
                 if (!badNumberSet)
                     numberSets[numNumbers].push_back(numberSet);
@@ -593,10 +610,38 @@ void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int*
     {
         assert(tree.getNode(node).cachedValueValid);
 
+        bool sqrtMinusFix = tree.getNode(node).originalValue < 0 && !ignoreMinus;
+
+        if (sqrtMinusFix)
+        {
+            str[*offset] = '-';
+            (*offset)++;
+        }
+
+        for (int i = 0; i < tree.getNode(node).numSqrts; i++)
+        {
+            str[*offset] = 's';
+            (*offset)++;
+            str[*offset] = 'q';
+            (*offset)++;
+            str[*offset] = 'r';
+            (*offset)++;
+            str[*offset] = 't';
+            (*offset)++;
+            str[*offset] = '(';
+            (*offset)++;
+        }
+
         addNumber(tree.getNode(node).originalValue,
                   tree.getNode(node).originalValueDecimal,
                   tree.getNode(node).originalValueRepeatingDecimal,
-                  ignoreMinus, str, offset);
+                  ignoreMinus || sqrtMinusFix, str, offset);
+
+        for (int i = 0; i < tree.getNode(node).numSqrts; i++)
+        {
+            str[*offset] = ')';
+            (*offset)++;
+        }
 
         for (int i = 0; i < tree.getNode(node).numFactorials; i++)
         {
@@ -614,10 +659,12 @@ void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int*
     bool omitSum = parentOp == OP_ADD;
     bool omitMul = parentOp == OP_MUL && (op == OP_MUL || op == OP_DIV || op == OP_POW);
     bool omitDiv = parentOp == OP_DIV && op == OP_DIV && node != 0 && node == GET_LEFT(GET_PARENT(node));
-    bool omitBrackets = !tree.getNode(node).numFactorials && (node == 0 || omitSum || omitMul || omitDiv);
+    bool omitBrackets = (!tree.getNode(node).numFactorials && (node == 0 || omitSum || omitMul || omitDiv))
+        || tree.getNode(node).numSqrts;
 
-    // TODO: proper fix
-    bool factorialFix = tree.getNode(node).numFactorials && tree.getNode(node).cachedValue.isNegative();
+    bool sqrtFix = tree.getNode(node).numSqrts && tree.getNode(node).cachedValue.isNegative();
+    bool factorialFix = tree.getNode(node).numFactorials
+        && tree.getNode(node).cachedValue.isNegative() && !sqrtFix;
     bool addFix = op == OP_ADD && tree.getNode(GET_RIGHT(node)).op == OP_NONE
         && tree.getNode(GET_RIGHT(node)).originalValue < 0;
     bool powFix = op == OP_POW && tree.getNode(GET_LEFT(node)).cachedValue.isNegative();
@@ -636,6 +683,34 @@ void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int*
     }
 
     if (factorialFix)
+    {
+        str[*offset] = '-';
+        (*offset)++;
+        str[*offset] = '(';
+        (*offset)++;
+    }
+
+    if (sqrtFix)
+    {
+        str[*offset] = '-';
+        (*offset)++;
+    }
+
+    for (int i = 0; i < tree.getNode(node).numSqrts; i++)
+    {
+        str[*offset] = 's';
+        (*offset)++;
+        str[*offset] = 'q';
+        (*offset)++;
+        str[*offset] = 'r';
+        (*offset)++;
+        str[*offset] = 't';
+        (*offset)++;
+        str[*offset] = '(';
+        (*offset)++;
+    }
+
+    if (sqrtFix)
     {
         str[*offset] = '-';
         (*offset)++;
@@ -686,6 +761,17 @@ void addAnswerPart(const Tree& tree, int node, bool ignoreMinus, char* str, int*
         (*offset)++;
     }
 
+    for (int i = 0; i < tree.getNode(node).numSqrts; i++)
+    {
+        str[*offset] = ')';
+        (*offset)++;
+    }
+    if (sqrtFix)
+    {
+        str[*offset] = ')';
+        (*offset)++;
+    }
+
     if (factorialFix)
     {
         str[*offset] = ')';
@@ -731,20 +817,118 @@ void addAnswer(const Tree& tree, int64_t answer)
     equationMutexes[answer].unlock();
 }
 
-
-int64_t getFactorial(int64_t n)
+int numSqrtCanBeUsed(Number number, Number* result)
 {
-    bool negative = n < 0;
+    if (number.isInteger() && (number.getIntegerValue() == 0
+        || number.getIntegerValue() == 1 || number.getIntegerValue() == -1))
+        return 0;
+
+    int numSqrts = 0;
+    bool negative = number.isNegative();
     if (negative)
+    {
+        if (!number.changeSign())
+            return 0;
+    }
+
+    for (; numSqrts < MAX_NODE_SQRTS; numSqrts++)
+    {
+        Number n = number;
+        if (!n.sqrt())
+            break;
+
+        number = n;
+    }
+
+    if (negative)
+    {
+        if (!number.changeSign())
+            return 0;
+    }
+
+    *result = number;
+    return numSqrts;
+}
+
+Number getSqrt(Number number, bool* valid)
+{
+    bool negative = number.isNegative();
+    if (negative)
+    {
+        if (!number.changeSign())
+        {
+            *valid = false;
+            return number;
+        }
+    }
+
+    if (!number.sqrt())
+    {
+        *valid = false;
+        return number;
+    }
+
+    if (negative)
+    {
+        if (!number.changeSign())
+        {
+            *valid = false;
+            return number;
+        }
+    }
+
+    *valid = true;
+    return number;
+}
+
+int numFactorialCanBeUsed(Number number)
+{
+    if (!number.isInteger())
+        return 0;
+
+    int64_t val = number.getIntegerValue();
+
+    if (!(val >= -MAX_FACTORIAL && val <= MAX_FACTORIAL
+        && val != 1 && val != -1 && val != 2 && val != -2))
+        return 0;
+
+    if (val == 3 || val == -3)
+        return 2;
+
+    return 1;
+}
+
+Number getFactorial(Number number, bool* valid)
+{
+    assert(number.isInteger());
+
+    int64_t n = number.getIntegerValue();
+    if (number.isNegative())
         n = -n;
 
-    int64_t result = 1;
+    assert(n <= MAX_FACTORIAL);
+
+    Number result = Number(1);
     for (int i = 2; i <= n; i++)
-        result *= i;
+    {
+        if (!result.mul(Number(i)))
+        {
+            *valid = false;
+            return result;
+        }
+    }
 
-    if (negative)
-        result = -result;
+    if (number.isNegative())
+    {
+        if (!result.changeSign())
+        {
+            *valid = false;
+            return result;
+        }
+    }
 
+
+    *valid = true;
     return result;
 }
 
@@ -758,9 +942,21 @@ Number solveEquationPart(Tree& tree, int node, bool* valid)
 
     if (tree.getNode(node).op == OP_NONE)
     {
-        int64_t n = tree.getNode(node).originalValue;
+        Number n = tree.getNode(node).originalValueWithoutFactAndSqrt;
+        for (int i = 0; i < tree.getNode(node).numSqrts; i++)
+        {
+            n = getSqrt(n, valid);
+            assert(*valid);
+            if (!(*valid))
+                return n;
+        }
         for (int i = 0; i < tree.getNode(node).numFactorials; i++)
-            n = getFactorial(n);
+        {
+            n = getFactorial(n, valid);
+            assert(*valid);
+            if (!(*valid))
+                return n;
+        }
 
         tree.getNode(node).cachedValue = n;
         tree.getNode(node).cachedValueValid = true;
@@ -846,13 +1042,19 @@ Number solveEquationPart(Tree& tree, int node, bool* valid)
     default: assert(0); break;
     }
 
-    if (tree.getNode(node).numFactorials)
+    for (int i = 0; i < tree.getNode(node).numSqrts; i++)
     {
-        assert(left.isInteger());
-        int64_t n = left.getIntegerValue();
-        for (int i = 0; i < tree.getNode(node).numFactorials; i++)
-            n = getFactorial(n);
-        left = n;
+        left = getSqrt(left, valid);
+        assert(*valid);
+        if (!(*valid))
+            return left;
+    }
+    for (int i = 0; i < tree.getNode(node).numFactorials; i++)
+    {
+        left = getFactorial(left, valid);
+        assert(*valid);
+        if (!(*valid))
+            return left;
     }
 
     tree.getNode(node).cachedValueValid = true;
@@ -879,10 +1081,17 @@ void solveEquation(Tree& tree, int nodePositions[][MAX_NUMBERS], int depth, bool
             addAnswer(tree, result.getIntegerValue());
     }
 
-    if (globalOperation[GLOP_FACTORIAL] && depth != 0 && valid)
+    if ((globalOperation[GLOP_FACTORIAL] || globalOperation[GLOP_SQRT]) && depth != 0 && valid)
     {
-        int factorialPositions[2 * MAX_NUMBERS];
-        int numFactorialPositions = 0;
+        int sqrtPositions[MAX_NODE_SQRTS * MAX_NUMBERS];
+        unsigned int numSqrtPositions = 0;
+
+        int factorialPositions[MAX_NODE_FACTORIALS * MAX_NUMBERS];
+        // Factorial is appliable only if there are no sqrts
+        // or all sqrts are already applied
+        // Reason: MAX_FACTORIAL = 6, max square = 4. sqrt(4) = 2 - not factorial appliable
+        int factorialNumSqrtNeeded[MAX_NODE_FACTORIALS * MAX_NUMBERS];
+        unsigned int numFactorialPositions = 0;
 
         int numNodes = 0;
         for (; numNodes < (1 << depth); numNodes++)
@@ -895,44 +1104,59 @@ void solveEquation(Tree& tree, int nodePositions[][MAX_NUMBERS], int depth, bool
         {
             int node = nodePositions[depth][i];
             assert(tree.getNode(node).cachedValueValid);
-            if (tree.getNode(node).cachedValue.isInteger())
-            {
-                int64_t val = tree.getNode(node).cachedValue.getIntegerValue();
-                if (val >= -MAX_FACTORIAL && val <= MAX_FACTORIAL
-                    && val != 1 && val != -1 && val != 2 && val != -2)
-                {
-                    factorialPositions[numFactorialPositions] = node;
-                    numFactorialPositions++;
 
-                    if (val == 3 || val == -3)
-                    {
-                        factorialPositions[numFactorialPositions] = node;
-                        numFactorialPositions++;
-                    }
-                }
+            Number result = tree.getNode(node).cachedValue;
+            int numSqrts = globalOperation[GLOP_SQRT]
+                ? numSqrtCanBeUsed(tree.getNode(node).cachedValue, &result) : 0;
+            assert(numSqrts <= MAX_NODE_SQRTS);
+
+            for (int j = 0; j < numSqrts; j++)
+            {
+                sqrtPositions[numSqrtPositions] = node;
+                numSqrtPositions++;
+            }
+
+            // If node value is a ^ n, where a=2^m and n > 1 then we need to test 4! instead of 2!
+            bool use4InsteadOf2ForFactorial = false;
+            if (numSqrts && result.isInteger() && abs(result.getIntegerValue()) == 2)
+            {
+                use4InsteadOf2ForFactorial = true;
+                result = result.isNegative() ? Number(-4) : Number(4);
+            }
+
+            int numFactorials = globalOperation[GLOP_FACTORIAL]
+                ? numFactorialCanBeUsed(result) : 0;
+            assert(numFactorials <= MAX_NODE_FACTORIALS);
+
+            for (int j = 0; j < numFactorials; j++)
+            {
+                factorialPositions[numFactorialPositions] = node;
+                factorialNumSqrtNeeded[numFactorialPositions] = use4InsteadOf2ForFactorial ? numSqrts - 1 : numSqrts;
+                numFactorialPositions++;
             }
         }
 
-        for (int i = 0; i < (1 << numFactorialPositions); i++)
+        for (unsigned int sqrtSet = 0; sqrtSet < (1ull << numSqrtPositions); sqrtSet++)
         {
-            Tree newTree = tree;
-            bool skip = false;
-            for (int j = 0; j < numFactorialPositions; j++)
-            {
-                if (j != 0 && factorialPositions[j] == factorialPositions[j - 1]
-                    && (i & (1 << j)) && !(i & (1 << (j - 1))))
-                {
-                    skip = true;
-                    continue;
-                }
+            Tree sqrtTree = tree;
+            bool sqrtSkip = false;
 
-                if (i & (1 << j))
+            for (unsigned int sqrt = 0; sqrt < numSqrtPositions; sqrt++)
+            {
+                if (sqrtSet & (1 << sqrt))
                 {
-                    newTree.getNode(factorialPositions[j]).numFactorials++;
-                    int node = factorialPositions[j];
+                    if (sqrt != 0 && sqrtPositions[sqrt] == sqrtPositions[sqrt - 1]
+                        && !(sqrtSet & (1 << (sqrt - 1))))
+                    {
+                        sqrtSkip = true;
+                        break;
+                    }
+
+                    sqrtTree.getNode(sqrtPositions[sqrt]).numSqrts++;
+                    int node = sqrtPositions[sqrt];
                     for (;;)
                     {
-                        newTree.getNode(node).cachedValueValid = false;
+                        sqrtTree.getNode(node).cachedValueValid = false;
                         if (!node)
                             break;
 
@@ -941,8 +1165,46 @@ void solveEquation(Tree& tree, int nodePositions[][MAX_NUMBERS], int depth, bool
                 }
             }
 
-            if (!skip)
-                solveEquation(newTree, nodePositions, depth - 1, i != 0);
+            if (sqrtSkip)
+                continue;
+
+            for (uint64_t factSet = 0; factSet < (1ull << numFactorialPositions); factSet++)
+            {
+                Tree factTree = sqrtTree;
+                bool factSkip = false;
+
+                for (unsigned int fact = 0; fact < numFactorialPositions; fact++)
+                {
+                    if (factSet & (1 << fact))
+                    {
+                        if (fact != 0 && factorialPositions[fact] == factorialPositions[fact - 1]
+                            && !(factSet & (1 << (fact - 1))))
+                        {
+                            factSkip = true;
+                            break;
+                        }
+                        if (factorialNumSqrtNeeded[fact] != factTree.getNode(factorialPositions[fact]).numSqrts)
+                        {
+                            factSkip = true;
+                            break;
+                        }
+
+                        factTree.getNode(factorialPositions[fact]).numFactorials++;
+                        int node = factorialPositions[fact];
+                        for (;;)
+                        {
+                            factTree.getNode(node).cachedValueValid = false;
+                            if (!node)
+                                break;
+
+                            node = GET_PARENT(node);
+                        }
+                    }
+                }
+
+                if (!factSkip)
+                    solveEquation(factTree, nodePositions, depth - 1, factSet != 0 || sqrtSet != 0);
+            }
         }
     }
 }
@@ -954,6 +1216,7 @@ void setLeafCachedValuesPart(const NumberSet& numSet, int* currentNumber, Tree& 
         Number number = numSet.getNumber(*currentNumber).n;
         tree.getNode(node).cachedValue = number;
         tree.getNode(node).cachedValueValid = true;
+        tree.getNode(node).originalValueWithoutFactAndSqrt = number;
         tree.getNode(node).originalValue = numSet.getNumber(*currentNumber).originalValue;
         tree.getNode(node).originalValueDecimal =
             numSet.getNumber(*currentNumber).originalValueDecimal;
@@ -1028,6 +1291,7 @@ void solveEquationSetWithParams(Tree& tree, int opPositions[], int nodePositions
 
             // a * -b skip | a / -b skip
             // note: there could we: -a * (b - c), where b - c < 0
+            // TODO: weak this fix and make a proper fix in solve
             if ((op == OP_MUL || op == OP_DIV)
                 && tree.getNode(rightMostLeftNode).originalValue < 0)
             {

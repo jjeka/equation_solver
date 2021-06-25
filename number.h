@@ -20,7 +20,8 @@ int64_t get10PowNumberDigits(int64_t val)
 class Number
 {
 public:
-    Number(int64_t numValue = 0);
+    Number(): Number(0) {}
+    explicit Number(int64_t numValue);
 
     bool fromDecimal(int64_t numValue, bool repeating);
 
@@ -34,6 +35,7 @@ public:
     bool mul(const Number& other);
     bool div(const Number& divider);
     bool pow(const Number& power);
+    bool sqrt();
 
 private:
 
@@ -67,15 +69,15 @@ bool Number::fromDecimal(int64_t numValue, bool repeating)
         n--;
     int64_t gcdValue = gcd(n, numValue);
 
-    if (COEF % gcdValue != 0)
+    if (COEF % (n / gcdValue) != 0)
         return false;
 
     int a = numValue / gcdValue;
     int b = n / gcdValue;
     val = COEF;
-    if (!mul(a))
+    if (!mul(Number(a)))
         return false;
-    if (!div(b))
+    if (!div(Number(b)))
         return false;
 
     return true;
@@ -166,9 +168,36 @@ bool Number::pow(const Number& power)
     return true;
 }
 
+bool Number::sqrt()
+{
+    int64_t low = 0;
+    int64_t high = (1ull << 32) - 1;
+    int64_t mid;
+
+    if (__builtin_mul_overflow(val, COEF, &val))
+        return false;
+
+    while (low <= high)
+    {
+        mid = (low + high) / 2;
+
+        if (mid * mid > val)
+            high = mid - 1;
+        else if (mid * mid < val)
+            low = mid + 1;
+        else
+        {
+            val = mid;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 #elif defined(USE_DOUBLE)
 
-#define EPS 0.00000001
+#define EPS 0.000001
 
 Number::Number(int64_t numValue):
         val((double)numValue)
@@ -181,6 +210,7 @@ bool Number::fromDecimal(int64_t numValue, bool repeating)
     if (repeating)
         denominator--;
     val = numValue / (double)denominator;
+
     return std::isfinite(val);
 }
 
@@ -232,6 +262,40 @@ bool Number::pow(const Number& power)
     val = std::pow(val, power.val);
 
     return std::isfinite(val);
+}
+
+bool Number::sqrt()
+{
+    int64_t low = 0;
+    int64_t high = (1ull << 32) - 1;
+    int64_t mid;
+    const int64_t COEF = (8 * 9 * 7 * 5 * 5);
+
+    val *= COEF;
+    if (!isInteger())
+        return false;
+
+    int64_t integerVal = getIntegerValue();
+
+    if (__builtin_mul_overflow(integerVal, COEF, &integerVal))
+        return false;
+
+    while (low <= high)
+    {
+        mid = (low + high) / 2;
+
+        if (mid * mid > integerVal)
+            high = mid - 1;
+        else if (mid * mid < integerVal)
+            low = mid + 1;
+        else
+        {
+            val = mid / (double)COEF;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 #else
