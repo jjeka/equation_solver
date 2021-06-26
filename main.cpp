@@ -13,7 +13,7 @@
 
 //#define SKIP_EMPTY
 #define NUM_THREADS 16
-#define DISABLE_ASSERTS
+//#define DISABLE_ASSERTS
 
 #ifdef DISABLE_ASSERTS
 #undef assert
