@@ -232,15 +232,6 @@ void createNLeafTrees(int n)
     }
 }
 
-int getLeftMostDigit(int number, int* divisor)
-{
-    *divisor = 1;
-    int i;
-    for (i = number; i > 9; i /= 10)
-        *divisor *= 10;
-    return number / (*divisor);
-}
-
 bool prepareData()
 {
     FILE* f = fopen("input.txt", "r");
@@ -566,6 +557,22 @@ void printResult()
     printf("RESULT SAVED\n");
 }
 
+int getNumDigits(int number)
+{
+    int i;
+    for (i = 0; number; i++)
+        number /= 10;
+    return i ? i : 1;
+}
+
+int getDigit(int number, int digit, int* divisor)
+{
+    *divisor = 1;
+    for (int i = 0; i < digit; i++)
+        *divisor *= 10;
+    return (number / (*divisor)) % ((*divisor) * 10);
+}
+
 void addNumber(int64_t n, bool decimal, bool repeatingDecimal, bool ignoreMinus, char* str, int* offset)
 {
     if (n < 0)
@@ -589,10 +596,11 @@ void addNumber(int64_t n, bool decimal, bool repeatingDecimal, bool ignoreMinus,
         (*offset)++;
     }
 
-    do
+    int numDigits = getNumDigits(n);
+    for (int i = numDigits - 1; i >= 0; i--)
     {
         int divisor;
-        int digit = getLeftMostDigit(n, &divisor);
+        int digit = getDigit(n, i, &divisor);
 
         n -= digit * divisor;
 
