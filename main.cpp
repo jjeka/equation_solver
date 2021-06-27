@@ -35,7 +35,6 @@
 #define MAX_DIV_BY 100000
 
 #define ALIGN_UP(a,b) ((((a) + (b) - 1) / (b)) * (b))
-#define min(a,b) (((a) < (b)) ? (a) : (b))
 
 typedef std::string equation;
 
@@ -1423,7 +1422,7 @@ void solveThread(int n)
     int task;
     while ((task = findTask()) != -1)
     {
-        int numSetsInTask = min(TASK_SIZE, (int)numberSets[n].size() - task * TASK_SIZE);
+        int numSetsInTask = std::min(TASK_SIZE, (int)numberSets[n].size() - task * TASK_SIZE);
         for (int i = 0; i < numSetsInTask; i++)
         {
             int numSetN = task * TASK_SIZE + i;
