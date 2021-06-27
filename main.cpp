@@ -524,9 +524,9 @@ bool prepareData()
     int64_t sum = 0;
     for (int i = 1; i <= numInputNumbers; i++)
     {
-        int64_t num = (int)numberSets[i].size() * (int)nLeafTrees[i].size();
-        printf("%d numbers: %lld iterations (%d numbers * %d trees)\n", i, num,
-               (int)numberSets[i].size(), (int)nLeafTrees[i].size());
+        int64_t num = (int64_t)numberSets[i].size() * (int64_t)nLeafTrees[i].size();
+        printf("%d numbers: %lld iterations (%lld numbers * %lld trees)\n", i, num,
+               (int64_t)numberSets[i].size(), (int64_t)nLeafTrees[i].size());
         sum += num;
     }
     printf("TOTAL %lld ITERATIONS\n\n", sum);
