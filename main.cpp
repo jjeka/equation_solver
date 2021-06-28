@@ -114,12 +114,6 @@ struct NumberSet
     }
 };
 
-enum ExtraOp
-{
-    EXOP_FACTORIAL = 1,
-    EXOP_SQRT = 2
-};
-
 struct Node
 {
     int op;
